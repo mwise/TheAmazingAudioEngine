@@ -308,7 +308,6 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     }
 }
 
-
 -(void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self name:AEAudioControllerDidRecreateGraphNotification object:_audioController];
 
