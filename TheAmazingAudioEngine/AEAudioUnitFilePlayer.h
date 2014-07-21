@@ -43,7 +43,9 @@ extern "C" {
 
 - (id)initWithAudioController:(AEAudioController*)audioController error:(NSError**)error;
 @property (nonatomic, retain, readwrite) NSURL *url;        //!< media file URL (get or set)
-@property (nonatomic, readonly) AudioStreamBasicDescription fileAudioDescription;  //!< Track audio description
+@property (nonatomic, readonly) AudioStreamBasicDescription fileAudioDescription;  //!< file audio description
+@property (nonatomic, assign) int loopCount;              //!< Number of loops
+//@property (nonatomic, assign) UInt32 loopCount;
 
 @end
 

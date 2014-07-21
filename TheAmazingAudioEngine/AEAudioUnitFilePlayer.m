@@ -51,7 +51,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 @end
 
 @implementation AEAudioUnitFilePlayer
-@synthesize url=_url, fileAudioDescription=_fileAudioDescription;
+@synthesize url=_url, fileAudioDescription=_fileAudioDescription, loopCount=_loopCount;
 
 - (id)initWithAudioController:(AEAudioController*)audioController
                                  error:(NSError**)error {
@@ -156,6 +156,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     _playhead = 0;
     _locatehead = 0;
     _lengthInFrames = 0;
+    self.loopCount = 0;
     checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Global, 0, &_componentDescription, sizeof(&_componentDescription)),
         "AudioUnitSetProperty(kAudioUnitProperty_StreamFormat)");
 }
@@ -163,7 +164,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 -(void)setUrl:(NSURL *)url {
     [self loadUrl:url error:nil];
 }
-//
+
 //-----------------------------------------------------------------------------
 - (void)loadUrl:(NSURL*)url error:(NSError**)error {
     OSStatus result;
@@ -215,7 +216,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
         region.mCompletionProc = nil;
         region.mCompletionProcUserData = nil;
         region.mAudioFile = _audioUnitFile;
-        region.mLoopCount = 0;
+        region.mLoopCount = _loopCount;
         region.mStartFrame = _locatehead;
         region.mFramesToPlay = _lengthInFrames - _locatehead;
 
@@ -274,6 +275,21 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     }
 
     return 0.0f;
+}
+
+-(void)setCurrentTime:(NSTimeInterval)currentTime {
+    if ((currentTime >= 0.0f) && (currentTime < [self duration])) {
+        if (self.channelIsPlaying) {
+            // call our own setPlaying to get things in order
+            [self setPlaying:NO];
+            _locatehead = currentTime * _fileAudioDescription.mSampleRate;
+            _playhead = _locatehead;
+            [self setPlaying:YES];
+        } else {
+            _locatehead = currentTime * _fileAudioDescription.mSampleRate;
+            _playhead = _locatehead;
+        }
+    }
 }
 
 -(void) setPlaying:(BOOL)isPlaying {
