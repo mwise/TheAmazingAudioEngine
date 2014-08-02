@@ -41,8 +41,12 @@ extern "C" {
  */
 @interface AEAudioUnitFilePlayer : AEAudioUnitChannel <AEAudioPlayable>
 
+-(OSStatus)scheduleRegion:(NSTimeInterval)regionStart regionEnd:(NSTimeInterval)regionEnd;
+
 - (id)initWithAudioController:(AEAudioController*)audioController error:(NSError**)error;
+- (id)initWithAudioController:(AEAudioController*)audioController withAudioFile:(AudioFileID*)audioFile error:(NSError**)error;
 @property (nonatomic, retain, readwrite) NSURL *url;        //!< media file URL (get or set)
+@property (nonatomic, assign) AudioFileID *audioFile;        //!< media file URL (get or set)
 @property (nonatomic, readonly) AudioStreamBasicDescription fileAudioDescription;  //!< file audio description
 @property (nonatomic, assign) int loopCount;              //!< Number of loops
 //@property (nonatomic, assign) UInt32 loopCount;

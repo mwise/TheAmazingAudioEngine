@@ -43,7 +43,7 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     AUNode _converterNode;
     AudioUnit _converterUnit;
     AUGraph _audioGraph;
-    AudioFileID _audioUnitFile;
+    AudioFileID *_audioUnitFile;
     SInt32 _locatehead;
     SInt32 _playhead;
     UInt32 _lengthInFrames;
@@ -51,12 +51,21 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 @end
 
 @implementation AEAudioUnitFilePlayer
-@synthesize url=_url, fileAudioDescription=_fileAudioDescription, loopCount=_loopCount;
+@synthesize url=_url, fileAudioDescription=_fileAudioDescription, loopCount=_loopCount, audioFile=_audioUnitFile;
 
 - (id)initWithAudioController:(AEAudioController*)audioController
                                  error:(NSError**)error {
     AudioComponentDescription audioComponentDescription = AEAudioComponentDescriptionMake(kAudioUnitManufacturer_Apple, kAudioUnitType_Generator, kAudioUnitSubType_AudioFilePlayer);
     return [self initWithComponentDescription:audioComponentDescription audioController:audioController  preInitializeBlock:nil error:error];
+}
+
+- (id)initWithAudioController:(AEAudioController*)audioController
+                withAudioFile:(AudioFileID*)audioFile
+                                 error:(NSError**)error {
+    self = [self initWithAudioController:audioController error:error];
+    self.audioFile = audioFile;
+    [self setupAudioFilePlayer];
+    return self;
 }
 
 - (id)initWithComponentDescription:(AudioComponentDescription)audioComponentDescription
@@ -145,13 +154,13 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
         checkResult(AudioUnitInitialize(_converterUnit), "AudioUnitInitialize");
     }
 
-    [self setupAudioFilePlayer];
+    //[self setupAudioFilePlayer];
 
     return YES;
 }
 
 -(void)setupAudioFilePlayer {
-    _audioUnitFile = nil;
+    //_audioUnitFile = nil;
     _url = nil;
     _playhead = 0;
     _locatehead = 0;
@@ -159,6 +168,12 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     self.loopCount = 0;
     checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Global, 0, &_componentDescription, sizeof(&_componentDescription)),
         "AudioUnitSetProperty(kAudioUnitProperty_StreamFormat)");
+
+    if (_audioUnitFile) {
+      [self setupAudioUnitFilePlayer];
+    } else {
+      NSLog(@"no audio file found");
+    }
 }
 
 -(void)setUrl:(NSURL *)url {
@@ -176,27 +191,35 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     if (url) {
         checkResult(result=AudioFileOpenURL((__bridge CFURLRef) url, kAudioFileReadPermission, 0, &_audioUnitFile), "AudioFileOpenURL");
         if (noErr == result) {
-            // Set the file to play
-            checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_ScheduledFileIDs, kAudioUnitScope_Global, 0, &_audioUnitFile, sizeof(_audioUnitFile)),
-                "AudioUnitSetProperty(kAudioUnitProperty_ScheduledFileIDs)");
-
-            // Determine file properties
-            UInt64 packetCount;
-            UInt32 size = sizeof(packetCount);
-            checkResult(AudioFileGetProperty(_audioUnitFile, kAudioFilePropertyAudioDataPacketCount, &size, &packetCount),
-                "AudioFileGetProperty(kAudioFilePropertyAudioDataPacketCount)");
-
-            size = sizeof(_fileAudioDescription);
-            checkResult(AudioFileGetProperty(_audioUnitFile, kAudioFilePropertyDataFormat, &size, &_fileAudioDescription),
-                "AudioFileGetProperty(kAudioFilePropertyDataFormat)");
-
-            _lengthInFrames = packetCount * _fileAudioDescription.mFramesPerPacket;
             _url = url;
-
-            [self setupPlayRegion];
+            [self setupAudioUnitFilePlayer];
         }
     }
+}
 
+-(void)setupAudioUnitFilePlayer {
+    // Set the file to play
+    checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_ScheduledFileIDs, kAudioUnitScope_Global, 0, &_audioUnitFile, sizeof(_audioUnitFile)),
+        "AudioUnitSetProperty(kAudioUnitProperty_ScheduledFileIDs)");
+
+    // Determine file properties
+    UInt64 packetCount;
+    UInt32 size = sizeof(packetCount);
+    checkResult(AudioFileGetProperty(_audioUnitFile, kAudioFilePropertyAudioDataPacketCount, &size, &packetCount),
+        "AudioFileGetProperty(kAudioFilePropertyAudioDataPacketCount)");
+
+    size = sizeof(_fileAudioDescription);
+    checkResult(AudioFileGetProperty(_audioUnitFile, kAudioFilePropertyDataFormat, &size, &_fileAudioDescription),
+        "AudioFileGetProperty(kAudioFilePropertyDataFormat)");
+
+    _lengthInFrames = packetCount * _fileAudioDescription.mFramesPerPacket;
+
+    [self setupPlayRegion];
+}
+
+-(void)setAudioFile:(AudioFileID*)audioFile{
+    _audioUnitFile = *audioFile;
+    [self setupAudioUnitFilePlayer];
 }
 
 - (OSStatus)setupPlayRegion {
@@ -230,6 +253,54 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 
          // Set the start time (now = -1)
          AudioTimeStamp startTime;
+        memset (&startTime, 0, sizeof(startTime));
+        startTime.mFlags = kAudioTimeStampSampleTimeValid;
+        startTime.mSampleTime = -1;
+        checkResult(AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_ScheduleStartTimeStamp, kAudioUnitScope_Global, 0, &startTime, sizeof(startTime)),
+                    "AudioUnitSetProperty(kAudioUnitProperty_ScheduleStartTimeStamp)");
+    }
+
+    return result;
+}
+
+
+-(OSStatus)scheduleRegion:(NSTimeInterval)regionStart regionEnd:(NSTimeInterval)regionEnd {
+    OSStatus result = -1;
+
+    if (_audioUnitFile) {
+        if (_locatehead >= _lengthInFrames) {
+            _locatehead = 0;
+        }
+
+        AudioUnitReset(_audioUnit, kAudioUnitScope_Global, 0);
+
+        UInt32 startFrame = regionStart * _fileAudioDescription.mSampleRate;
+        UInt32 endFrame = regionEnd * _fileAudioDescription.mSampleRate;
+        UInt32 framesToPlay = endFrame - startFrame;
+
+        ScheduledAudioFileRegion region;
+        memset (&region.mTimeStamp, 0, sizeof(region.mTimeStamp));
+        region.mTimeStamp.mFlags = kAudioTimeStampSampleTimeValid;
+        region.mTimeStamp.mSampleTime = 0;
+        //region.mCompletionProc = audioRegionCompletion;
+        //region.mCompletionProcUserData = (__bridge void *)(self);
+        region.mCompletionProc = nil;
+        region.mCompletionProcUserData = nil;
+        region.mAudioFile = _audioUnitFile;
+        region.mLoopCount = _loopCount;
+        region.mStartFrame = startFrame;
+        region.mFramesToPlay = framesToPlay;
+
+        checkResult(result = AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_ScheduledFileRegion, kAudioUnitScope_Global, 0, &region, sizeof(region)),
+                         "AudioUnitSetProperty(kAudioUnitProperty_ScheduledFileRegion)");
+
+        // Prime the player by reading some frames from disk
+        UInt32 defaultNumberOfFrames = 0;
+        checkResult(result = AudioUnitSetProperty(_audioUnit, kAudioUnitProperty_ScheduledFilePrime, kAudioUnitScope_Global, 0, &defaultNumberOfFrames, sizeof(defaultNumberOfFrames)),
+                         "AudioUnitSetProperty(kAudioUnitProperty_ScheduledFilePrime)");
+
+         // Set the start time (now = -1)
+        AudioTimeStamp startTime;
         memset (&startTime, 0, sizeof(startTime));
         startTime.mFlags = kAudioTimeStampSampleTimeValid;
         startTime.mSampleTime = -1;
@@ -299,8 +370,8 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
             [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(completionCallSetup) object:nil];
 
             // need to reset before creating the new start region
-            AudioUnitReset(_audioUnit, kAudioUnitScope_Global, 0);
-            [self setupPlayRegion];
+            //AudioUnitReset(_audioUnit, kAudioUnitScope_Global, 0);
+            //[self setupPlayRegion];
 
             self.channelIsPlaying = YES;
 
