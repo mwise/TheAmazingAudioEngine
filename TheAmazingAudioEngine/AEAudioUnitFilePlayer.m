@@ -47,6 +47,9 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
     SInt32 _locatehead;
     SInt32 _playhead;
     UInt32 _lengthInFrames;
+    @private
+    NSTimeInterval _regionStart;
+    NSTimeInterval _regionEnd;
 }
 @end
 
@@ -225,6 +228,11 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 - (OSStatus)setupPlayRegion {
     OSStatus result = -1;
 
+    if (_regionStart && _regionEnd) {
+      result = [self scheduleRegion:_regionStart regionEnd:_regionEnd];
+      return result;
+    }
+
     if (_audioUnitFile) {
         if (_locatehead >= _lengthInFrames) {
             _locatehead = 0;
@@ -265,6 +273,8 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
 
 
 -(OSStatus)scheduleRegion:(NSTimeInterval)regionStart regionEnd:(NSTimeInterval)regionEnd {
+    _regionStart = regionStart;
+    _regionEnd = regionEnd;
     OSStatus result = -1;
 
     if (_audioUnitFile) {
@@ -370,8 +380,8 @@ static inline BOOL _checkResult(OSStatus result, const char *operation, const ch
             [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(completionCallSetup) object:nil];
 
             // need to reset before creating the new start region
-            //AudioUnitReset(_audioUnit, kAudioUnitScope_Global, 0);
-            //[self setupPlayRegion];
+            AudioUnitReset(_audioUnit, kAudioUnitScope_Global, 0);
+            [self setupPlayRegion];
 
             self.channelIsPlaying = YES;
 
